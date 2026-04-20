@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title></title>
+<link rel="icon" href="data:," />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.128.0/build/three.module.js"
+  }
+}
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #ffffff;
+  }
+
+  body { position: relative; }
+
+  canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    touch-action: none;
+  }
+
+  #info {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 2;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    font: 12px/1.45 Arial, sans-serif;
+    color: #111111;
+    min-width: 220px;
+    pointer-events: auto;
+    user-select: none;
+  }
+
+  #info .label {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  #info .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    white-space: nowrap;
+  }
+
+  #info .row span:last-child {
+    font-variant-numeric: tabular-nums;
+  }
+
+  #info .controls {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 8px;
+    margin-top: 8px;
+    align-items: center;
+  }
+
+  #info input {
+    width: 90px;
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    border-radius: 8px;
+    padding: 4px 6px;
+    font: 12px Arial, sans-serif;
+    color: #111111;
+    background: #ffffff;
+  }
+
+  #info button {
+    margin-top: 8px;
+    width: 100%;
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    border-radius: 9px;
+    padding: 6px 8px;
+    font: 12px Arial, sans-serif;
+    font-weight: 700;
+    color: #111111;
+    background: #f3f3f3;
+    cursor: pointer;
+  }
+
+  #info button:hover {
+    background: #ebebeb;
+  }
+</style>
+</head>
+<body>
+  <div id="info" aria-live="polite">
+    <span class="label">X / Y / Z</span>
+    <div class="row"><span>Position</span><span id="positionReadout">0.00, 0.00, 0.00</span></div>
+    <div class="row"><span>Rotation</span><span id="rotationReadout">0.0°, 0.0°, 0.0°</span></div>
+    <div class="controls">
+      <span>X</span><input id="inputX" type="text" inputmode="decimal" value="0" />
+      <span>Y</span><input id="inputY" type="text" inputmode="decimal" value="0" />
+      <span>Z</span><input id="inputZ" type="text" inputmode="decimal" value="0" />
+      <span>Rot X</span><input id="inputRotX" type="text" inputmode="decimal" value="0" />
+      <span>Rot Y</span><input id="inputRotY" type="text" inputmode="decimal" value="0" />
+      <span>Rot Z</span><input id="inputRotZ" type="text" inputmode="decimal" value="0" />
+    </div>
+    <button id="applyTransform" type="button">Apply Transform</button>
+  </div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'https://unpkg.com/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
+    import { EffectComposer } from 'https://unpkg.com/three@0.128.0/examples/jsm/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'https://unpkg.com/three@0.128.0/examples/jsm/postprocessing/RenderPass.js';
+    import { BokehPass } from 'https://unpkg.com/three@0.128.0/examples/jsm/postprocessing/BokehPass.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
+    camera.position.set(0, 1.5, 7.5);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    document.body.appendChild(renderer.domElement);
+
+    const axesHelper = new THREE.AxesHelper(2.5);
+    scene.add(axesHelper);
+
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bokehPass = new BokehPass(scene, camera, {
+      focus: 5.0,
+      aperture: 0.00008,
+      maxblur: 0.006,
+      width: window.innerWidth,
+      height: window.innerHeight
+    });
+    composer.addPass(bokehPass);
+
+    const modelRoot = new THREE.Group();
+    scene.add(modelRoot);
+
+    let modelReady = false;
+    const positionReadout = document.getElementById('positionReadout');
+    const rotationReadout = document.getElementById('rotationReadout');
+    const inputX = document.getElementById('inputX');
+    const inputY = document.getElementById('inputY');
+    const inputZ = document.getElementById('inputZ');
+    const inputRotX = document.getElementById('inputRotX');
+    const inputRotY = document.getElementById('inputRotY');
+    const inputRotZ = document.getElementById('inputRotZ');
+    const applyTransformBtn = document.getElementById('applyTransform');
+
+    const loader = new GLTFLoader();
+    const targetUrl = 'scene.glb';
+    const keyframeStart = {
+      position: new THREE.Vector3(0.04, -0.30, -0.70),
+      rotationDeg: new THREE.Vector3(14.0, 72.0, 0.0)
+    };
+    const keyframeMid = {
+      position: new THREE.Vector3(0.47, 0.60, 2.00),
+      rotationDeg: new THREE.Vector3(10.0, 200.0, 10.0)
+    };
+    const keyframeEnd = {
+      position: new THREE.Vector3(-0.50, 0.19, 1.05),
+      rotationDeg: new THREE.Vector3(10.0, 140.0, 10.0)
+    };
+    const keyframeFourth = {
+      position: new THREE.Vector3(-1.71, 0.83, 2.55),
+      rotationDeg: new THREE.Vector3(10.0, 140.0, 10.0)
+    };
+    const keyframeFifth = {
+      position: new THREE.Vector3(-0.01, 0.72, 3.30),
+      rotationDeg: new THREE.Vector3(-63.9, 167.0, 10.0)
+    };
+    const keyframeSixth = {
+      position: new THREE.Vector3(-0.01, 0.72, 3.30),
+      rotationDeg: new THREE.Vector3(-90.0, 272.0, 10.0)
+    };
+    const keyframeSeventh = {
+      position: new THREE.Vector3(0.06, -0.20, 0.00),
+      rotationDeg: new THREE.Vector3(7.6, 42.8, 10.0)
+    };
+    const keyframes = [keyframeStart, keyframeMid, keyframeEnd, keyframeFourth, keyframeFifth, keyframeSixth, keyframeSeventh];
+    const keyframeDurationMs = 2200;
+    const keyframeDamping = 0.12;
+    const keyframeTotalDurationMs = (keyframes.length - 1) * keyframeDurationMs;
+    let keyframeAnimating = false;
+    let keyframeAnimationStart = 0;
+    const keyframeRotationTracks = buildRotationTracks();
+    const sampledPosition = new THREE.Vector3();
+    const sampledEuler = new THREE.Euler(0, 0, 0, 'XYZ');
+    const sampledQuaternion = new THREE.Quaternion();
+
+    function createBezierEasing(p1x, p1y, p2x, p2y) {
+      const newtonIterations = 4;
+      const newtonMinSlope = 0.001;
+      const subdivisionPrecision = 1e-7;
+      const subdivisionMaxIterations = 10;
+
+      function a(a1, a2) {
+        return 1 - 3 * a2 + 3 * a1;
+      }
+
+      function b(a1, a2) {
+        return 3 * a2 - 6 * a1;
+      }
+
+      function c(a1) {
+        return 3 * a1;
+      }
+
+      function calcBezier(t, a1, a2) {
+        return ((a(a1, a2) * t + b(a1, a2)) * t + c(a1)) * t;
+      }
+
+      function getSlope(t, a1, a2) {
+        return 3 * a(a1, a2) * t * t + 2 * b(a1, a2) * t + c(a1);
+      }
+
+      function binarySubdivide(x, aVal, bVal) {
+        let currentX;
+        let currentT;
+        let i = 0;
+        do {
+          currentT = aVal + (bVal - aVal) / 2;
+          currentX = calcBezier(currentT, p1x, p2x) - x;
+          if (currentX > 0) {
+            bVal = currentT;
+          } else {
+            aVal = currentT;
+          }
+        } while (Math.abs(currentX) > subdivisionPrecision && ++i < subdivisionMaxIterations);
+        return currentT;
+      }
+
+      function newtonRaphsonIterate(x, guessT) {
+        let t = guessT;
+        for (let i = 0; i < newtonIterations; i += 1) {
+          const slope = getSlope(t, p1x, p2x);
+          if (slope === 0) {
+            return t;
+          }
+          const currentX = calcBezier(t, p1x, p2x) - x;
+          t -= currentX / slope;
+        }
+        return t;
+      }
+
+      function getTForX(x) {
+        const guessT = x;
+        const initialSlope = getSlope(guessT, p1x, p2x);
+        if (initialSlope >= newtonMinSlope) {
+          return newtonRaphsonIterate(x, guessT);
+        }
+        if (initialSlope === 0) {
+          return guessT;
+        }
+        return binarySubdivide(x, 0, 1);
+      }
+
+      return (x) => {
+        if (x <= 0) return 0;
+        if (x >= 1) return 1;
+        return calcBezier(getTForX(x), p1y, p2y);
+      };
+    }
+
+    function setFromKeyframe(frame) {
+      modelRoot.position.copy(frame.position);
+      modelRoot.rotation.set(
+        THREE.MathUtils.degToRad(frame.rotationDeg.x),
+        THREE.MathUtils.degToRad(frame.rotationDeg.y),
+        THREE.MathUtils.degToRad(frame.rotationDeg.z)
+      );
+    }
+
+    function getClampedFrame(index) {
+      return keyframes[Math.max(0, Math.min(keyframes.length - 1, index))];
+    }
+
+    function catmullRomScalar(p0, p1, p2, p3, t) {
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+    }
+
+    function buildRotationTracks() {
+      const x = [];
+      const y = [];
+      const z = [];
+      let prevX = keyframes[0].rotationDeg.x;
+      let prevY = keyframes[0].rotationDeg.y;
+      let prevZ = keyframes[0].rotationDeg.z;
+      x.push(prevX);
+      y.push(prevY);
+      z.push(prevZ);
+
+      for (let i = 1; i < keyframes.length; i += 1) {
+        const frame = keyframes[i];
+        let nextX = frame.rotationDeg.x;
+        let nextY = frame.rotationDeg.y;
+        let nextZ = frame.rotationDeg.z;
+
+        while (nextX - prevX > 180) nextX -= 360;
+        while (nextX - prevX < -180) nextX += 360;
+        while (nextY - prevY > 180) nextY -= 360;
+        while (nextY - prevY < -180) nextY += 360;
+        while (nextZ - prevZ > 180) nextZ -= 360;
+        while (nextZ - prevZ < -180) nextZ += 360;
+
+        x.push(nextX);
+        y.push(nextY);
+        z.push(nextZ);
+        prevX = nextX;
+        prevY = nextY;
+        prevZ = nextZ;
+      }
+
+      return { x, y, z };
+    }
+
+    function sampleSmoothKeyframes(progress01) {
+      const maxSegment = keyframes.length - 1;
+      const segmentFloat = THREE.MathUtils.clamp(progress01, 0, 1) * maxSegment;
+      const segmentIndex = Math.min(Math.floor(segmentFloat), maxSegment - 1);
+      const localT = segmentFloat - segmentIndex;
+
+      const frame0 = getClampedFrame(segmentIndex - 1);
+      const frame1 = getClampedFrame(segmentIndex);
+      const frame2 = getClampedFrame(segmentIndex + 1);
+      const frame3 = getClampedFrame(segmentIndex + 2);
+
+      sampledPosition.set(
+        catmullRomScalar(frame0.position.x, frame1.position.x, frame2.position.x, frame3.position.x, localT),
+        catmullRomScalar(frame0.position.y, frame1.position.y, frame2.position.y, frame3.position.y, localT),
+        catmullRomScalar(frame0.position.z, frame1.position.z, frame2.position.z, frame3.position.z, localT)
+      );
+
+      const rotX = catmullRomScalar(
+        keyframeRotationTracks.x[Math.max(0, segmentIndex - 1)],
+        keyframeRotationTracks.x[segmentIndex],
+        keyframeRotationTracks.x[Math.min(maxSegment, segmentIndex + 1)],
+        keyframeRotationTracks.x[Math.min(maxSegment, segmentIndex + 2)],
+        localT
+      );
+      const rotY = catmullRomScalar(
+        keyframeRotationTracks.y[Math.max(0, segmentIndex - 1)],
+        keyframeRotationTracks.y[segmentIndex],
+        keyframeRotationTracks.y[Math.min(maxSegment, segmentIndex + 1)],
+        keyframeRotationTracks.y[Math.min(maxSegment, segmentIndex + 2)],
+        localT
+      );
+      const rotZ = catmullRomScalar(
+        keyframeRotationTracks.z[Math.max(0, segmentIndex - 1)],
+        keyframeRotationTracks.z[segmentIndex],
+        keyframeRotationTracks.z[Math.min(maxSegment, segmentIndex + 1)],
+        keyframeRotationTracks.z[Math.min(maxSegment, segmentIndex + 2)],
+        localT
+      );
+
+      sampledEuler.set(
+        THREE.MathUtils.degToRad(rotX),
+        THREE.MathUtils.degToRad(rotY),
+        THREE.MathUtils.degToRad(rotZ)
+      );
+      sampledQuaternion.setFromEuler(sampledEuler);
+    }
+
+    function startKeyframeAnimation() {
+      keyframeAnimationStart = performance.now();
+      keyframeAnimating = true;
+    }
+
+    function stopKeyframeAnimation() {
+      keyframeAnimating = false;
+    }
+
+    function fitModel(root) {
+      const box = new THREE.Box3().setFromObject(root);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+
+      root.position.sub(center);
+
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scale = maxDim > 0 ? 3.0 / maxDim : 1;
+      root.scale.setScalar(scale);
+
+      const targetZ = Math.max(3.1, maxDim * scale * 1.25);
+      const targetY = Math.max(0.85, size.y * scale * 0.42);
+      camera.position.set(0, targetY, targetZ);
+      camera.lookAt(0, 0, 0);
+    }
+
+    loader.load(
+      targetUrl,
+      (gltf) => {
+        const model = gltf.scene || gltf.scenes[0];
+        model.traverse((child) => {
+          if (child.isMesh) {
+            const sourceMaterial = Array.isArray(child.material) ? child.material[0] : child.material;
+            child.material = new THREE.MeshBasicMaterial({
+              color: 0x111111,
+              wireframe: true,
+              wireframeLinewidth: 1,
+              side: THREE.DoubleSide,
+              map: sourceMaterial && sourceMaterial.map ? sourceMaterial.map : null
+            });
+          }
+        });
+
+        modelRoot.add(model);
+        fitModel(modelRoot);
+        setFromKeyframe(keyframeStart);
+        startKeyframeAnimation();
+
+        modelReady = true;
+        updateReadout();
+      },
+      undefined,
+      (err) => {
+        console.error(err);
+      }
+    );
+
+    const pointerState = {
+      active: false,
+      mode: 'rotate',
+      lastX: 0,
+      lastY: 0,
+      touches: [],
+      lastDistance: 0
+    };
+
+    function isRotateMode(event) {
+      return event.button === 2 || event.shiftKey;
+    }
+
+    function isRollMode(event) {
+      return event.altKey;
+    }
+
+    function updateReadout() {
+      const position = modelRoot.position;
+      const rotation = modelRoot.rotation;
+      positionReadout.textContent = `${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}`;
+      rotationReadout.textContent = `${THREE.MathUtils.radToDeg(rotation.x).toFixed(1)}°, ${THREE.MathUtils.radToDeg(rotation.y).toFixed(1)}°, ${THREE.MathUtils.radToDeg(rotation.z).toFixed(1)}°`;
+      inputX.value = position.x.toFixed(2);
+      inputY.value = position.y.toFixed(2);
+      inputZ.value = position.z.toFixed(2);
+      inputRotX.value = THREE.MathUtils.radToDeg(rotation.x).toFixed(1);
+      inputRotY.value = THREE.MathUtils.radToDeg(rotation.y).toFixed(1);
+      inputRotZ.value = THREE.MathUtils.radToDeg(rotation.z).toFixed(1);
+      axesHelper.position.copy(modelRoot.position);
+    }
+
+    function applyTypedTransform() {
+      if (!modelReady) {
+        return;
+      }
+
+      stopKeyframeAnimation();
+
+      const nextX = Number.parseFloat(inputX.value);
+      const nextY = Number.parseFloat(inputY.value);
+      const nextZ = Number.parseFloat(inputZ.value);
+      const nextRotX = Number.parseFloat(inputRotX.value);
+      const nextRotY = Number.parseFloat(inputRotY.value);
+      const nextRotZ = Number.parseFloat(inputRotZ.value);
+
+      modelRoot.position.x = Number.isFinite(nextX) ? nextX : modelRoot.position.x;
+      modelRoot.position.y = Number.isFinite(nextY) ? nextY : modelRoot.position.y;
+      modelRoot.position.z = Number.isFinite(nextZ) ? nextZ : modelRoot.position.z;
+      modelRoot.rotation.x = Number.isFinite(nextRotX) ? THREE.MathUtils.degToRad(nextRotX) : modelRoot.rotation.x;
+      modelRoot.rotation.y = Number.isFinite(nextRotY) ? THREE.MathUtils.degToRad(nextRotY) : modelRoot.rotation.y;
+      modelRoot.rotation.z = Number.isFinite(nextRotZ) ? THREE.MathUtils.degToRad(nextRotZ) : modelRoot.rotation.z;
+      updateReadout();
+    }
+
+    applyTransformBtn.addEventListener('click', applyTypedTransform);
+    [inputX, inputY, inputZ, inputRotX, inputRotY, inputRotZ].forEach((input) => {
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          applyTypedTransform();
+        }
+      });
+    });
+
+    renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
+
+    renderer.domElement.addEventListener('pointerdown', (event) => {
+      stopKeyframeAnimation();
+      pointerState.active = true;
+      pointerState.mode = isRollMode(event) ? 'roll' : isRotateMode(event) ? 'rotate' : 'move';
+      pointerState.lastX = event.clientX;
+      pointerState.lastY = event.clientY;
+      renderer.domElement.setPointerCapture(event.pointerId);
+    });
+
+    renderer.domElement.addEventListener('pointermove', (event) => {
+      if (!pointerState.active) return;
+
+      const dx = event.clientX - pointerState.lastX;
+      const dy = event.clientY - pointerState.lastY;
+      pointerState.lastX = event.clientX;
+      pointerState.lastY = event.clientY;
+
+      if (pointerState.mode === 'move') {
+        const moveScale = camera.position.z * 0.0018;
+        modelRoot.position.x += dx * moveScale;
+        modelRoot.position.y -= dy * moveScale;
+      } else if (pointerState.mode === 'roll') {
+        modelRoot.rotation.z += dx * 0.01;
+      } else {
+        modelRoot.rotation.y += dx * 0.01;
+        modelRoot.rotation.x += dy * 0.01;
+        modelRoot.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, modelRoot.rotation.x));
+      }
+
+      updateReadout();
+    });
+
+    function endPointer(event) {
+      pointerState.active = false;
+      try {
+        renderer.domElement.releasePointerCapture(event.pointerId);
+      } catch (captureError) {
+        void captureError;
+      }
+    }
+
+    renderer.domElement.addEventListener('pointerup', endPointer);
+    renderer.domElement.addEventListener('pointercancel', endPointer);
+    renderer.domElement.addEventListener('pointerleave', () => {
+      pointerState.active = false;
+    });
+
+    renderer.domElement.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      if (!modelReady) {
+        return;
+      }
+      stopKeyframeAnimation();
+      const zStep = event.deltaY > 0 ? -0.15 : 0.15;
+      modelRoot.position.z += zStep;
+      updateReadout();
+    }, { passive: false });
+
+    renderer.domElement.addEventListener('touchstart', (event) => {
+      stopKeyframeAnimation();
+      if (event.touches.length === 1) {
+        pointerState.active = true;
+        pointerState.mode = 'move';
+        pointerState.lastX = event.touches[0].clientX;
+        pointerState.lastY = event.touches[0].clientY;
+      } else if (event.touches.length === 2) {
+        pointerState.active = true;
+        pointerState.mode = 'rotate';
+        pointerState.lastX = (event.touches[0].clientX + event.touches[1].clientX) * 0.5;
+        pointerState.lastY = (event.touches[0].clientY + event.touches[1].clientY) * 0.5;
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
+        pointerState.lastDistance = Math.sqrt(dx * dx + dy * dy);
+      }
+    }, { passive: true });
+
+    renderer.domElement.addEventListener('touchmove', (event) => {
+      event.preventDefault();
+      if (event.touches.length === 1 && pointerState.mode === 'move') {
+        const dx = event.touches[0].clientX - pointerState.lastX;
+        const dy = event.touches[0].clientY - pointerState.lastY;
+        pointerState.lastX = event.touches[0].clientX;
+        pointerState.lastY = event.touches[0].clientY;
+        const moveScale = camera.position.z * 0.0018;
+        modelRoot.position.x += dx * moveScale;
+        modelRoot.position.y -= dy * moveScale;
+      } else if (event.touches.length === 2 && pointerState.mode === 'rotate') {
+        const centerX = (event.touches[0].clientX + event.touches[1].clientX) * 0.5;
+        const centerY = (event.touches[0].clientY + event.touches[1].clientY) * 0.5;
+        const moveDX = centerX - pointerState.lastX;
+        const moveDY = centerY - pointerState.lastY;
+        pointerState.lastX = centerX;
+        pointerState.lastY = centerY;
+        modelRoot.rotation.y += moveDX * 0.01;
+        modelRoot.rotation.x += moveDY * 0.01;
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const delta = distance - (pointerState.lastDistance || distance);
+        modelRoot.position.z += delta * 0.01;
+        pointerState.lastDistance = distance;
+      }
+      updateReadout();
+    }, { passive: false });
+
+    renderer.domElement.addEventListener('touchend', () => {
+      pointerState.active = false;
+      pointerState.lastDistance = 0;
+    }, { passive: true });
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (modelReady && keyframeAnimating) {
+        const elapsed = performance.now() - keyframeAnimationStart;
+        const progress = THREE.MathUtils.clamp(elapsed / keyframeTotalDurationMs, 0, 1);
+        sampleSmoothKeyframes(progress);
+
+        modelRoot.position.lerp(sampledPosition, keyframeDamping);
+        modelRoot.quaternion.slerp(sampledQuaternion, keyframeDamping);
+
+        updateReadout();
+
+        if (progress >= 1) {
+          setFromKeyframe(keyframes[keyframes.length - 1]);
+          updateReadout();
+          keyframeAnimating = false;
+        }
+      }
+
+      axesHelper.position.copy(modelRoot.position);
+
+      composer.render();
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      composer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
