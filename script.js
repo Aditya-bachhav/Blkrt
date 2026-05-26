@@ -321,7 +321,7 @@ let mpx=0,mpy=0,prx=0,pry=0;
 document.addEventListener('mousemove',e=>{mpx=(e.clientX-innerWidth/2)/(innerWidth/2)*0.12;mpy=(e.clientY-innerHeight/2)/(innerHeight/2)*0.12},{passive:true});
 
 setLoad(10);
-loadMainModel('scene.glb',
+loadMainModel('models/scene.glb',
   model=>{
     setLoad(88);
     model.traverse(c=>{
